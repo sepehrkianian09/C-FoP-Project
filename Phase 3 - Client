@@ -1,0 +1,333 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <winsock2.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include <string.h>
+#include <conio.h>
+#include <dos.h>
+
+#define PORT 12345
+#define SA struct sockaddr
+#define Smax 32
+#define sec 7
+
+//Fundamental
+int CSocketC();		//copied from the source & It is for Client
+int checker(int a, int b);
+int control(int In, int limit);
+void backspacer(int i);
+
+//Stage 1
+int Reglog(char reg[], char auth[]);
+
+//Stage 2
+int CJChannel(char auth[], int a);
+int Logout(char auth[]);
+
+//Stage 3
+void SMessage(char auth[]);
+int RMLChannel(char auth[], int a);
+void Search(char auth[], int a);
+
+int main()
+{
+	int In = 1, Stage = 1, controller = 1, ent = '\n';
+	char auth[200] = {};
+	system("COLOR F5");
+	while(1){
+		In = 1;
+		while(Stage == 1){
+			printf(" Account Menu: \n%c1: Register \n%c2: Login\n", checker(In, 1), checker(In, 2));
+			fflush(stdin);
+			if((controller = control(In, 2)) == 13){
+				switch(In){
+					case 1:					//Registering
+						Stage = Reglog("register ", auth);
+						break;
+					case 2:					//Logging In
+						Stage = Reglog("login ", auth);
+						break;
+				};
+			}
+			else if(controller < 3)						{In = controller;}
+			system("cls");
+		}
+		In = 1;
+		while(Stage == 2){
+			printf(" Main Menu: \n%c1: Create Channel \n%c2: Join Channel \n%c3: Logout \n", checker(In, 1), checker(In, 2), checker(In, 3));
+			fflush(stdin);
+			if((controller = control(In, 3)) == 13){
+				switch(In){
+					case 1:					//Creating Channel
+						Stage = CJChannel(auth, 1);
+						break;
+					case 2:					//Joining Channel
+						Stage = CJChannel(auth, 2);
+						break;
+					case 3:					//Logging Out
+						Stage = Logout(auth);
+						break;
+				}
+			}
+			else if(controller < 4)						{In = controller;}
+			system("cls");
+		}
+		In = 1;
+		while(Stage == 3){
+			fflush(stdin);
+			printf(" Chat Menu: \n%c1: Send Message \n%c2: Refresh \n%c3: Channel Members \n%c4: Leave Channel \n%c5: Search user \n%c6: Search Message \n"
+			, checker(In, 1), checker(In, 2), checker(In, 3), checker(In, 4), checker(In, 5), checker(In, 6));
+			if((controller = control(In, 6)) == 13){
+				switch(In){
+					case 1:					//Sending Message
+						SMessage(auth);
+						break;
+					case 2:					//Refreshing
+						Stage = RMLChannel(auth, 2);
+						break;
+					case 3:					//Seeing Channel Members
+						Stage = RMLChannel(auth, 3);
+						break;
+					case 4:					//Leaving Channel
+						Stage = RMLChannel(auth, 4);
+						break;
+					case 5:
+						Search(auth, 1);
+						break;
+					case 6:
+						Search(auth, 2);
+						break;
+				}
+			}
+			else if(controller < 7)						{In = controller;}
+			fflush(stdin);
+			system("cls");
+		}
+	}
+	return 0;
+}
+
+int CSocketC(){
+	int sock;
+	struct sockaddr_in servaddr;
+
+	WORD wVersionRequested;
+    WSADATA wsaData;
+    int error;
+
+    wVersionRequested = MAKEWORD(2, 2);
+
+    error = WSAStartup(wVersionRequested, &wsaData);
+    if (error != 0) {
+        printf("WSAStartup failed with error: %d\n", error);
+        return -1;
+    }
+
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock == -1) {
+		printf("Socket creation failed...\n");
+		return -1;
+	}
+
+	memset(&servaddr, 0, sizeof(servaddr));
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	servaddr.sin_port = htons(PORT);
+
+	if (connect(sock, (SA*)&servaddr, sizeof(servaddr)) != 0) {
+		printf("Connection to the server failed...\n");
+		return -1;
+	}
+	return sock;
+}
+
+int Reglog(char reg[], char auth[]){
+	for(int l = 0; l < 33; l++)					{auth[l] = '\0';}
+	char ord[2057] = {}, user[1024], pass[1024], response[200] = {};
+
+	puts("Enter Username");
+	scanf("%s", user);
+	puts("Enter Password");
+	scanf("%s", pass);
+
+	//Creating the order
+	int i, j, k = strlen(reg);
+	sprintf(ord, "%s%s, %s\n\0", reg, user, pass);
+	int sock = CSocketC();		if(sock == -1)			{return 1;}
+	send(sock, ord, strlen(ord), 0);
+	recv(sock, response, 200, 0);
+	closesocket(sock);
+	if(response[9] == 'E'){
+		printf("{%s", &response[26]);
+		counter(sec);
+		return 1;
+	}
+	if(strncmp(reg, "reg", 3) == 0)				{return 1;}
+	for(i = 31; i < 63; i++)				{auth[i - 31] = response[i];}
+	return 2;
+}
+
+int CJChannel(char auth[], int a){
+	char ord[1024] = {}, Cname[100], response[200] = {};						int j;
+	switch(a){
+		case 1:											//Creating channel
+			printf("Please Enter The Channel You Wanna Create:\n");
+			scanf("%s", Cname);
+			strcat(ord, "create channel ");			j = 15;
+			break;
+		case 2:											//Joining Channel
+			printf("Please Enter The Channel You Wanna Join:\n");
+			scanf("%s", Cname);
+			strcat(ord, "join channel ");			j = 13;
+			break;
+	}
+	sprintf(&ord[j], "%s, %s\n\0", Cname, auth);
+	int sock = CSocketC();		if(sock == -1)			{return 2;}
+	send(sock, ord, strlen(ord), 0);
+	recv(sock, response, 200, 0);
+	closesocket(sock);
+	if(response[9] == 'E'){
+		printf("{%s", &response[26]);
+		counter(sec);
+		return 2;
+	}
+	return 3;
+}
+
+int Logout(char auth[]){
+	char ord[1024] = {}, response[200] = {};
+	sprintf(ord, "logout %s\n\0", auth);
+	int sock = CSocketC();		if(sock == -1)			{return 2;}
+	send(sock, ord, 41, 0);
+	recv(sock, response, 200, 0);
+	closesocket(sock);
+	//You must decide here to stay in 2 or not
+	if(response[9] == 'E'){
+		printf("{%s", &response[26]);
+		counter(sec);
+		return 2;
+	}
+	return 1;
+}
+
+void SMessage(char auth[]){
+	char ord[2053] = "send ", response[200] = {}, message[1024];					int i, j = 5;
+	scanf("\n%[^\n]%*c", message);
+	sprintf(ord, "send %s, %s\n\0", message, auth);
+	int sock = CSocketC();		if(sock == -1)			{return;}
+	send(sock, ord, strlen(ord), 0);
+	recv(sock, response, 200, 0);
+	closesocket(sock);
+	if(response[9] == 'E'){
+		printf("{%s", &response[26]);
+		counter(sec);
+	}
+	return;
+}
+
+int RMLChannel(char auth[], int a){
+	char ord[1024] = {}, response[16384] = {};						int j;
+	switch(a){
+		case 2:
+			strcat(ord, "refresh ");					j = 8;				break;
+		case 3:
+			strcat(ord, "channel members ");			j = 16;				break;
+		case 4:
+			strcat(ord, "leave ");						j = 6;				break;
+	}
+	sprintf(&ord[j], "%s\n\0", auth);
+	int sock = CSocketC();		if(sock == -1)			{return 3;}
+	send(sock, ord, j + 34, 0);
+	recv(sock, response, 16384, 0);
+	closesocket(sock);
+	if(response[9] == 'E'){
+		printf("{%s", &response[26]);
+		counter(sec);
+		return 3;
+	}
+	if(a == 4)							{return 2;}
+	printf("{%s", &response[25]);
+	counter(sec);
+	return 3;
+}
+
+void Search(char auth[], int a){
+	char ord[1024] = {}, response[1024] = {}, message[1024] = {}, garbage[Smax] = {};				int j = 0;
+	
+	switch(a){
+		case 1:												//Search user
+			printf("Please Enter the user you wanna search : \n");
+			if(scanf("%32[^\n]%[^\n]", message, garbage) != 1){
+				printf("Usernames' size isn't bigger than %d \n", Smax);				return;
+			} 
+			sprintf(ord, "search user ");				j = 12;				break;
+			
+		case 2:												//Search Message
+			printf("Please Enter the message you wanna search : \n");
+			scanf("%[^\n]", message);						fflush(stdin);
+			sprintf(ord, "search message ");			j = 15;				break;
+	}
+	
+	sprintf(&ord[j], "%s, %s\n\0", message, auth);
+	
+	int sock = CSocketC();		if(sock == -1)			{return 3;}
+	send(sock, ord, 36 + j + strlen(message), 0);
+	recv(sock, response, 1024, 0);
+	closesocket(sock);
+	if(response[9] == 'E'){
+		printf("{%s", &response[26]);
+		counter(sec);
+		return;
+	}
+	printf("{%s", &response[31]);
+	counter(sec);
+	return;
+}
+
+int checker(int a, int b){
+	if(a == b)					{return 62;}
+	else						{return 32;}
+}
+
+int control(int In, int limit){
+	int ch1 = 0, ch2 = 0, ch = '\n';
+	ch1 = getch();
+	fflush(stdin);
+	if(ch1 == 0xE0){
+		ch2 = getch();
+		switch(ch2){
+			case 72: 							//UP WAS PRESSED
+				if(In != 1)						{In--;}
+				break;
+			case 80: 							//DOWN WAS PRESSED
+				if(In != limit)					{In++;}
+				break;
+		};
+	}
+	
+	else if(ch1 == 13)							{In = ch1;}
+	
+	else										{In = 11;}
+	
+	system("cls");
+	return In;
+}
+
+void counter(int a){
+	printf("you have %d seconds time to see this message :   ", a);
+	for(int i = 1; i <= a; i++){
+		backspacer(i);
+		printf("%d", i);
+		sleep(1);
+	}
+	return;
+}
+
+void backspacer(int i){
+	while(i > 0){
+		printf("\b");
+		i /= 10;
+	}
+	return;
+}
