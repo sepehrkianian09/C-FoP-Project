@@ -1,0 +1,696 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <winsock2.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+#include <conio.h>
+#include <dir.h>
+#include <process.h>
+
+#define Omax 100
+#define Rmax 16384
+#define Smax 33
+#define Umax 7			//Umax = Log(Max Size of RAM / 64b) / Log(92);
+#define Mmax 65
+
+#define MAX 80
+#define PORT 12345
+#define SA struct sockaddr
+
+struct user{
+	char username[Smax];
+	char password[Smax];
+	char auth[33];
+	int filepos;
+	struct user *nextuser;
+	struct user *preuser;
+	struct user *nextcuser;
+	struct user *precuser;
+	struct channel *userchannel;
+};
+
+struct channel{
+	char name[Smax];
+	int membersize;
+	struct user *firstmember;
+	struct channel *nextchannel;
+	struct channel *prechannel;
+};
+
+typedef struct channel channel;
+typedef struct user user;
+
+void reg(char ord[], char response[], int client_socket);
+int login(char ord[], char response[], user *firstuser, int usersize, int client_socket);
+
+int CChannel(char ord[], char response[], channel *firstchannel, int channelsize, user *firstuser, int client_socket);
+int JChannel(char ord[], char response[], channel *firstchannel, int channelsize, user *firstuser, int client_socket);
+int Logout(char ord[], char response[], user *firstuser, int client_socket);
+
+void Smessage(char ord[], char response[], user *firstuser, int client_socket);
+void Refresh(char ord[], char response[], user *firstuser, int client_socket);
+void Cmembers(char ord[], char response[], user *firstuser, int client_socket);
+void LChannel(char ord[], char response[], user *firstuser, int *channelsize, int client_socket);
+void Searchuser(char ord[], char response[], user *firstuser, int client_socket);
+void Searchmessage(char ord[], char response[], user *firstuser, int client_socket);
+
+int strcomp(char s1[], char s2[]);
+void authcreator(user *firstuser);
+user* guserfinder(char ord[], char response[], user *firstuser, char cname[], bool x, int client_socket);
+bool gchannelchecker(char response[], user* usernum, int client_socket);
+char *asscanf(char ord[], char ans[]);
+void *pointermover(void *pointer, int size, bool x);
+bool search(char s1[], char s2[]);
+void out(int a, char message[]);
+
+int main(){
+	char ord[Omax], response[Rmax];							int usersize = 0, channelsize = 0;
+	user *firstuser;										channel *firstchannel;
+	puts("Server initialized.");
+
+	mkdir("Resources");
+	mkdir("Resources/Users");
+	mkdir("Resources/Channels");
+
+	int server_socket, client_socket;
+    struct sockaddr_in server, client;
+
+    WORD wVersionRequested;
+    WSADATA wsaData;
+    int err;
+
+	// Use the MAKEWORD(lowbyte, highbyte) macro declared in Windef.h
+    wVersionRequested = MAKEWORD(2, 2);
+
+    err = WSAStartup(wVersionRequested, &wsaData);
+    if (err != 0) {
+        // Tell the user that we could not find a usable Winsock DLL.
+        printf("WSAStartup failed with error: %d\n", err);
+        return 1;
+    }
+
+    // Create and verify socket
+    server_socket = socket(AF_INET, SOCK_STREAM, 6);
+	if (server_socket == INVALID_SOCKET)
+        wprintf(L"socket function failed with error = %d\n", WSAGetLastError() );
+    else
+        printf("Socket successfully created..\n");
+
+    // Assign IP and port
+    memset(&server, 0, sizeof(server));
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = htonl(INADDR_ANY);
+    server.sin_port = htons(PORT);
+
+		// Bind newly created socket to given IP and verify
+    if ((bind(server_socket, (SA *)&server, sizeof(server))) != 0){
+        printf("Socket binding failed...\n");
+        exit(0);
+    }
+    else
+        printf("Socket successfully bound..\n");
+
+	while(true){
+
+		// Now server is ready to listen and verify
+		if ((listen(server_socket, 5)) != 0){
+			printf("Listen failed...\n");
+			exit(0);
+		}
+		else
+			printf("Server listening..\n");
+
+		// Accept the data packet from client and verify
+		int len = sizeof(client);
+		client_socket = accept(server_socket, (SA *)&client, &len);
+		if (client_socket < 0){
+			printf("Server accceptance failed...\n");
+			exit(0);
+		}
+		else
+			printf("Server acccepted the client..\n");
+
+		if(!usersize){
+			firstuser = (user *)malloc(sizeof(user));
+			firstuser -> preuser = NULL;
+		}
+
+		if(!channelsize){
+			firstchannel = (channel *)malloc(sizeof(channel));
+			firstchannel -> prechannel = NULL;
+		}
+
+		recv(client_socket, ord, Rmax, 0);
+		out(1, ord);
+
+		if(strncmp(ord, "register ", 9) == 0)							{reg(ord, response, client_socket);}
+
+		else if(strncmp(ord, "login ", 6) == 0)							{usersize += login(ord, response, firstuser, usersize, client_socket);}
+
+		else if(strncmp(ord, "create channel ", 15) == 0)				{channelsize += CChannel(ord, response, firstchannel, channelsize, firstuser, client_socket);}
+
+		else if(strncmp(ord, "join channel ", 13) == 0)					{channelsize += JChannel(ord, response, firstchannel, channelsize, firstuser, client_socket);}
+
+		else if(strncmp(ord, "logout ", 7) == 0)						{usersize -= Logout(ord, response, firstuser, client_socket);}
+
+		else if(strncmp(ord, "send ", 5) == 0)							{Smessage(ord, response, firstuser, client_socket);}
+
+		else if(strncmp(ord, "refresh ", 8) == 0)						{Refresh(ord, response, firstuser, client_socket);}
+
+		else if(strncmp(ord, "channel members ", 16) == 0)				{Cmembers(ord, response, firstuser, client_socket);}
+
+		else if(strncmp(ord, "leave ", 6) == 0)							{LChannel(ord, response, firstuser, &channelsize, client_socket);}
+
+		else if(strncmp(ord, "search user ", 12) == 0)					{Searchuser(ord, response, firstuser, client_socket);}
+
+		else if(strncmp(ord, "search message ", 15) == 0)				{Searchmessage(ord, response, firstuser, client_socket);}
+
+		else{
+			sprintf(response, "{\"type\":\"Error\",\"content\":\"Unknown request pattern.\"}\n\0");
+			send(client_socket, response, 54, 0);
+		}
+		printf("usernumber : %d \t\tchannelnumber : %d \t\t\n", usersize, channelsize);
+		out(2, response);
+	}
+
+	return 0;
+}
+
+void reg(char ord[], char response[], int client_socket){
+	char username[Smax], password[Smax], filename[Smax + 26];
+
+	if(sscanf(asscanf(&ord[9], username), "%s\n", password) != 1){
+		sprintf(response, "{\"type\":\"Error\",\"content\":\"Unknown request pattern.\"}\n\0");
+		send(client_socket, response, 54, 0);
+		return;
+	}
+
+	sprintf(filename, "Resources/Users/%s.user.json", username);
+
+	if(fopen(filename, "r") != NULL){
+		sprintf(response, "{\"type\":\"Error\",\"content\":\"this username is not available.\"}\n\0");
+		send(client_socket, response, 61, 0);
+	}
+
+	else{
+		FILE *usercreater = fopen(filename, "w");
+		fprintf(usercreater, "{\"username\":\"%s\",\"password\":\"%s\"}", username, password);
+		fclose(usercreater);
+
+		sprintf(response, "{\"type\":\"Successful\",\"content\":\"\"}\n\0");
+		send(client_socket, response, 35, 0);
+	}
+
+	return;
+}
+
+int login(char ord[], char response[], user *firstuser, int usersize, int client_socket){
+	char username[Smax], password[Smax], filename[Smax + 26];
+	int ans = 0;				FILE *userchecker;
+
+	if(sscanf(asscanf(&ord[6], username), "%s", password) != 1){
+		sprintf(response, "{\"type\":\"Error\",\"content\":\"Unknown request pattern.\"}\n\0");
+		send(client_socket, response, 54, 0);
+		return 0;
+	}
+
+	sprintf(filename, "Resources/Users/%s.user.json", username);
+
+	if((userchecker = fopen(filename, "r")) == NULL){
+		sprintf(response, "{\"type\":\"Error\",\"content\":\"Username is not valid.\"}\n\0");
+		send(client_socket, response, 52, 0);
+	}
+
+	else{
+		for(int i = usersize - 1; i >= 0; i--){
+			if(strcomp(firstuser -> username, username) == 0){
+				sprintf(response, "{\"type\":\"Error\",\"content\":\"The user %s is already logged in.\"}\n\0", username);
+				send(client_socket, response, 61 + strlen(username), 0);
+				return 0;
+			}
+			if(i)							{firstuser = firstuser -> nextuser;}
+		}
+
+		char filepassword[Smax];
+		fscanf(userchecker, "{\"username\":\"%*[^\"]\",\"password\":\"%[^\"]\"}", filepassword);
+		fclose(userchecker);
+
+		if(strcomp(password, filepassword) != 0){
+			sprintf(response, "{\"type\":\"Error\",\"content\":\"Wrong password.\"}\n\0");
+			send(client_socket, response, 45, 0);
+			return 0;
+		}
+
+		if(usersize){
+			//Connecting user to previous users
+			firstuser -> nextuser = (user *)malloc(sizeof(user));
+			firstuser -> nextuser -> preuser = firstuser;
+			firstuser = firstuser -> nextuser;
+		}
+
+		//Setting the specifics of user's pointer
+		firstuser -> nextuser = NULL;
+		firstuser -> nextcuser = NULL;
+		firstuser -> precuser = NULL;
+		firstuser -> userchannel = NULL;
+
+		//Setting the specifics of user's information
+		sprintf(firstuser -> username, "%s\0", username);
+		sprintf(firstuser -> password, "%s\0", password);
+		authcreator(firstuser);
+		firstuser -> filepos = -1;
+
+		sprintf(response, "{\"type\":\"AuthToken\",\"content\":\"%s\"}\n\0", firstuser -> auth);
+		send(client_socket, response, 66, 0);
+		ans = 1;
+	}
+	return ans;
+}
+
+int CChannel(char ord[], char response[], channel *firstchannel, int channelsize, user *firstuser, int client_socket){
+	char cname[Smax], filename[Smax + 32];						int ans = 0;					FILE *channelfile;					user* usernum = NULL;
+
+	if((usernum = guserfinder(&ord[15], response, firstuser, cname, 1, client_socket)) != NULL){
+		sprintf(filename, "Resources/Channels/%s.channel.json", cname);
+
+		if(fopen(filename, "r") != NULL){
+			sprintf(response, "{\"type\":\"Error\",\"content\":\"channel name is not available.\"}\n\0");
+			send(client_socket, response, 60, 0);
+			return 0;
+		}
+
+		if(channelsize){
+			//Connecting to previous channels
+			firstchannel = pointermover(firstchannel, channelsize - 1, 0);
+			firstchannel -> nextchannel = (channel *)malloc(sizeof(channel));
+			firstchannel -> nextchannel -> prechannel = firstchannel;
+			firstchannel = firstchannel -> nextchannel;
+		}
+
+		firstchannel -> nextchannel = NULL;
+		strcpy(firstchannel -> name, cname);
+
+		//Connecting to firstmember
+		firstchannel -> firstmember = usernum;
+		usernum -> userchannel = firstchannel;
+		firstchannel -> membersize = 1;
+		usernum -> filepos = 13;
+
+		//Creating the file of the channel
+		channelfile = fopen(filename, "w+");
+		fprintf(channelfile, "{\"messages\":[{\"sender\":\"server\",\"content\":\"%s created %s.\"}],\"name\":\"%s\"}", usernum -> username, cname, cname);
+		fseek(channelfile, -(12 + strlen(cname)), SEEK_END);
+		fclose(channelfile);
+
+		sprintf(response, "{\"type\":\"Successful\",\"content\":\"\"}\n\0");
+		send(client_socket, response, 35, 0);
+		ans++;
+	}
+	return ans;
+}
+
+int JChannel(char ord[], char response[], channel *firstchannel, int channelsize, user *firstuser, int client_socket){
+	char cname[Smax], filename[Smax + 32];				int ans = 0, channelnum;					FILE *channelfile;				user* usernum = NULL;
+
+	if((usernum = guserfinder(&ord[13], response, firstuser, cname, 1, client_socket)) != NULL){
+		sprintf(filename, "Resources/Channels/%s.channel.json", cname);
+
+		if((channelfile = fopen(filename, "r+")) == NULL){
+			sprintf(response, "{\"type\":\"Error\",\"content\":\"channel name is not valid.\"}\n\0");
+			send(client_socket, response, 56, 0);
+			return 0;
+		}
+
+		//Finding the channel
+		for(channelnum = channelsize - 1; channelnum >= 0; channelnum--){
+			if(strcomp(firstchannel -> name, cname) == 0)					{break;}
+			if(channelnum)					{firstchannel = firstchannel -> nextchannel;}
+		}
+
+		//for the state of not being in channels' list
+		if(channelnum < 0){
+
+			if(channelsize){
+				//Connecting to previous channels
+				firstchannel -> nextchannel = (channel *)malloc(sizeof(channel));
+				firstchannel -> nextchannel -> prechannel = firstchannel;
+				firstchannel = firstchannel -> nextchannel;
+			}
+
+			firstchannel -> nextchannel = NULL;
+
+			//Connecting thisuser to channel
+			firstchannel -> firstmember = usernum;
+			usernum -> userchannel = firstchannel;
+			strcpy(firstchannel -> name, cname);
+			firstchannel -> membersize = 0;
+			ans++;
+		}
+
+		//For the state of being in channels' list.
+		else{
+			//Connecting this user to other members
+			user *lastmember = (user *)pointermover(firstchannel -> firstmember, (firstchannel -> membersize) - 1, 1);
+			lastmember -> nextcuser = usernum;
+			usernum -> precuser = lastmember;
+			usernum -> userchannel = firstchannel;
+		}
+
+		fseek(channelfile, -(12 + strlen(cname)), SEEK_END);
+		fprintf(channelfile, ",{\"sender\":\"server\",\"content\":\"%s joined.\"}],\"name\":\"%s\"}", usernum -> username, cname);
+		fclose(channelfile);
+
+
+		firstchannel -> membersize += 1;
+		usernum -> filepos = 13;
+
+		sprintf(response, "{\"type\":\"Successful\",\"content\":\"\"}\n\0");
+		send(client_socket, response, 35, 0);
+	}
+	return ans;
+}
+
+int Logout(char ord[], char response[], user *firstuser, int client_socket){
+	int ans = 0;							user* usernum = NULL;
+
+	if((usernum = guserfinder(&ord[7], response, firstuser, ord, 0, client_socket)) != NULL){
+
+		//Omitting user from users' Linked list
+		if(usernum -> preuser == NULL){
+			if(usernum -> nextuser != NULL){
+				usernum -> nextuser -> preuser = NULL;
+			}
+		}
+		else{
+			if(usernum -> nextuser == NULL){
+				usernum -> preuser -> nextuser = NULL;
+			}
+			else{
+				usernum -> preuser -> nextuser = usernum -> nextuser;
+				usernum -> nextuser -> preuser = usernum -> preuser;
+			}
+		}
+		free(usernum);
+
+		sprintf(response, "{\"type\":\"Successful\",\"content\":\"\"}\n\0");
+		send(client_socket, response, 35, 0);
+		ans++;
+	}
+	return ans;
+}
+
+void Smessage(char ord[], char response[], user *firstuser, int client_socket){
+	char message[Mmax], filename[Smax + 32];						user* usernum = NULL;
+
+	if((usernum = guserfinder(&ord[5], response, firstuser, message, 1, client_socket)) != NULL && gchannelchecker(response, usernum, client_socket)){
+		sprintf(filename, "Resources/Channels/%s.channel.json", usernum -> userchannel -> name);
+		FILE *channelfile = fopen(filename, "r+");
+
+		fseek(channelfile, -(12 + strlen(usernum -> userchannel -> name)), SEEK_END);
+		fprintf(channelfile, ",{\"sender\":\"%s\",\"content\":\"%s\"}],\"name\":\"%s\"}", usernum -> username, message, usernum -> userchannel -> name);
+		fclose(channelfile);
+
+		sprintf(response, "{\"type\":\"Successful\",\"content\":\"\"}\n\0");
+		send(client_socket, response, 35, 0);
+	}
+	return;
+}
+
+void Refresh(char ord[], char response[], user *firstuser, int client_socket){
+	char refresh[Rmax] = {}, filename[Smax + 32];					user* usernum = NULL;
+
+	if((usernum = guserfinder(&ord[8], response, firstuser, ord, 0, client_socket)) != NULL){
+		sprintf(filename, "Resources/Channels/%s.channel.json", usernum -> userchannel -> name);
+		FILE *channelfile = fopen(filename, "r+");
+		fseek(channelfile, usernum -> filepos, SEEK_SET);
+
+		if(fscanf(channelfile, ",%[^]]", refresh) == 0){
+			fscanf(channelfile, "%[^]]", refresh);
+		}
+		usernum -> filepos = ftell(channelfile);
+		fclose(channelfile);
+
+		sprintf(response, "{\"type\":\"list\",\"content\":[%s]}\n\0", refresh);
+		send(client_socket, response, 29 + strlen(refresh), 0);
+	}
+	return 0;
+}
+
+void Cmembers(char ord[], char response[], user *firstuser, int client_socket){
+	user* usernum = NULL;
+
+	if((usernum = guserfinder(&ord[16], response, firstuser, ord, 0, client_socket)) != NULL && gchannelchecker(response, usernum, client_socket)){
+
+		sprintf(response, "{\"type\":\"List\",\"content\":[");
+		char *responsepointer = response + 26;								int responselen = 30, len = 0;
+
+		for(user *cmember = usernum -> userchannel -> firstmember; cmember != NULL; cmember = cmember -> nextcuser){
+			sprintf(responsepointer, "\"%s\",", cmember -> username);
+			len = strlen(cmember -> username) + 3;
+			responsepointer += len;
+			responselen += len;
+		}
+
+		sprintf(responsepointer - 1, "]}\n\0");
+		send(client_socket, response, responselen, 0);
+	}
+	return;
+}
+
+void LChannel(char ord[], char response[], user *firstuser, int *channelsize, int client_socket){
+	char filename[Smax + 32];				user* usernum = NULL;
+
+	if((usernum = guserfinder(&ord[6], response, firstuser, ord, 0, client_socket)) != NULL && gchannelchecker(response, usernum, client_socket)){
+
+		sprintf(filename, "Resources/Channels/%s.channel.json", usernum -> userchannel -> name);
+		FILE *channelfile = fopen(filename, "r+");
+		fseek(channelfile, -(12 + strlen(usernum -> userchannel -> name)), SEEK_END);
+		fprintf(channelfile, ",{\"sender\":\"server\",\"content\":\"%s leaved the channel.\"}],\"name\":\"%s\"}", usernum -> username, usernum -> userchannel -> name);
+		fclose(channelfile);
+
+		usernum -> userchannel -> membersize -= 1;
+
+		if(usernum -> precuser == NULL){
+			if(usernum -> nextcuser == NULL){
+				//Omitting channel from channels' Linked list
+				if(usernum -> userchannel -> prechannel == NULL){
+					if(usernum -> userchannel -> nextchannel != NULL){
+						usernum -> userchannel -> nextchannel -> prechannel = NULL;
+					}
+				}
+				else{
+					if(usernum -> userchannel -> nextchannel == NULL){
+						usernum -> userchannel -> prechannel -> nextchannel = NULL;
+					}
+					else{
+						usernum -> userchannel -> prechannel -> nextchannel = usernum -> userchannel -> nextchannel;
+						usernum -> userchannel -> nextchannel -> prechannel = usernum -> userchannel -> prechannel;
+					}
+				}
+				free(usernum -> userchannel);
+				usernum -> userchannel = NULL;
+				(*channelsize)--;
+			}
+			else{
+				usernum -> userchannel -> firstmember = usernum -> nextcuser;
+				usernum -> nextcuser -> precuser = NULL;
+				usernum -> nextcuser = NULL;
+			}
+		}
+		else{
+			if(usernum -> nextcuser == NULL){
+				usernum -> precuser -> nextcuser = NULL;
+				usernum -> precuser = NULL;
+			}
+			else{
+				usernum -> precuser -> nextcuser = usernum -> nextcuser;
+				usernum -> nextcuser -> precuser = usernum -> precuser;
+				usernum -> precuser = NULL;
+				usernum -> nextcuser = NULL;
+			}
+		}
+
+		usernum -> userchannel = NULL;
+
+		sprintf(response, "{\"type\":\"Successful\",\"content\":\"\"}\n\0");
+		send(client_socket, response, 35, 0);
+	}
+	return;
+}
+
+void Searchuser(char ord[], char response[], user *firstuser, int client_socket){
+	char username[Smax] = {};						user *usernum = NULL;						bool x = 0;
+
+	if((usernum = guserfinder(&ord[12], response, firstuser, username, 1, client_socket)) != NULL && gchannelchecker(response, usernum, client_socket)){
+		for(user *cmember = usernum -> userchannel -> firstmember; cmember != NULL; cmember = cmember -> nextcuser){
+			if(strcomp(username, cmember -> username) == 0){
+			x = 1;							break;
+			}
+		}
+		if(x){
+			sprintf(response, "{\"type\":\"Successful\",\"content\":\"This user is on the channel.\"}\n\0");
+		}
+		else{
+			sprintf(response, "{\"type\":\"Successful\",\"content\":\"This user is not on the channel.\"}\n\0");
+		}
+		send(client_socket, response, strlen(response), 0);
+	}
+	return;
+}
+
+void Searchmessage(char ord[], char response[], user *firstuser, int client_socket){
+	char filename[Smax + 32] = {}, message[Mmax] = {};							user *usernum = NULL;
+
+	if((usernum = guserfinder(&ord[15], response, firstuser, message, 1, client_socket)) != NULL && gchannelchecker(response, usernum, client_socket)){
+		char sentmessage[Mmax] = {}, sender[Smax] = {};				char *responsepointer = response + 32;				int responselen = 36, len = 0;
+		sprintf(filename, "Resources/Channels/%s.channel.json", usernum -> userchannel -> name);
+		sprintf(response, "{\"type\":\"Successful\",\"content\":[");
+
+		FILE *channelfile = fopen(filename, "r+");
+		fseek(channelfile, 13, SEEK_SET);
+
+		while(fscanf(channelfile, "{\"sender\":\"%[^\"]\",\"content\":\"%[^\"]\"}", sender, sentmessage) != 0){
+			if(strcomp(sender, "server") != 0 && search(sentmessage, message)){
+			sprintf(responsepointer, "\"%s\",", sentmessage);
+			len = strlen(sentmessage) + 3;
+			responsepointer += len;
+			responselen += len;
+			}
+			fseek(channelfile, 1, SEEK_CUR);
+		}
+		sprintf(responsepointer - (responsepointer != response + 32), "]}\n\0");
+		send(client_socket, response, responselen, 0);
+	}
+	return;
+}
+
+int strcomp(char s1[], char s2[]){
+	int ans = 0;
+
+	for(int i = 0; s1[i] != 0 || s2[i] != 0; i++){
+		if(s1[i] != s2[i]){
+			ans += s1[i] > s2[i] ? 1 : -1;
+			break;
+		}
+	}
+
+	return ans;
+}
+
+void authcreator(user *firstuser){
+	int a = Umax + 1, b = 32 - a;						firstuser -> auth[32] = 0;
+	srand(time(NULL));
+
+	for(int i = 0; i < b; i++){
+		firstuser -> auth[i] = 35 + (rand() % 92);
+	}
+
+	for(int i = b; i < 32; i++){
+		firstuser -> auth[i] = 35 + (rand() % 92);
+		for(user *userchecker = firstuser -> preuser; userchecker != NULL; userchecker = userchecker -> preuser){									//For omitting the chance of duplication
+			if(userchecker -> auth[i] == firstuser -> auth[i]){
+				i--;		break;
+			}
+		}
+	}
+	return;
+}
+
+user *guserfinder(char ord[], char response[], user *firstuser, char cname[], bool x, int client_socket){
+	char auth[33], garbage[Smax];					auth[32] = 0;				user *usernum = NULL;
+
+	if((x && sscanf(asscanf(ord, cname), "%32[^\n]%[^\n]\n", auth, garbage) != 1) || (!x && sscanf(ord, "%32[^\n]%[^\n]\n", auth, garbage) != 1)){
+		sprintf(response, "{\"type\":\"Error\",\"content\":\"Unknown request pattern.\"}\n\0");
+		send(client_socket, response, 54, 0);
+	}
+	else{
+		while(firstuser != NULL){
+			if(strcomp(firstuser -> auth, auth) == 0){
+				usernum = firstuser;			break;
+			}
+			firstuser = firstuser -> nextuser;
+		}
+
+		if(usernum == NULL){
+			sprintf(response, "{\"type\":\"Error\",\"content\":\"Authentication code is not valid.\"}\n\0");
+			send(client_socket, response, 67, 0);
+		}
+	}
+	return usernum;
+}
+
+bool gchannelchecker(char response[], user* usernum, int client_socket){
+	if(usernum -> userchannel == NULL){
+			sprintf(response, "{\"type\":\"Error\",\"content\":\"User doesn't have a channel.\"}\n\0");
+			send(client_socket, response, 58, 0);
+			return 0;
+		}
+	return 1;
+}
+
+char *asscanf(char ord[], char ans[]){
+	int i = 0;
+	for(i = 0; ord[i] != ',' || ord[i + 1] != ' '; i++){
+		if(ord[i] == 0)			{return NULL;}
+		ans[i] = ord[i];
+	}
+	ans[i] = 0;
+	return &ord[i + 2];
+}
+
+void *pointermover(void *pointer, int size, bool x){
+	if(x){
+		for(int i = 0; i < size; i++){
+			pointer = ((user *)pointer) -> nextcuser;
+		}
+	}
+	else{
+		for(int i = 0; i < size; i++){
+			pointer = ((channel *)pointer) -> nextchannel;
+		}
+	}
+	return pointer;
+}
+
+bool search(char s1[], char s2[]){
+	int len = strlen(s2);						bool x = 0;
+	
+	if(len > strlen(s1))						{return x;}
+	
+	for(char *checker = s1; (*checker) != 0; checker++){
+		if((*checker) == s2[0] && strncmp(checker, s2, len) == 0){
+			x = 1;					break;
+		}
+	}
+	return x;
+}
+
+void out(int a, char message[]){
+	int hour, minute, second, day, month, year;
+
+	time_t now;
+	time(&now);
+	struct tm *local = localtime(&now);
+
+	hour = local -> tm_hour;
+	minute = local -> tm_min;
+	second = local -> tm_sec;
+
+	day = local -> tm_mday;
+	month = local -> tm_mon + 1;
+	year = local -> tm_year + 1900;
+
+	printf("Info | %d/%02d/%02d %02d:%02d:%02d | ", year, month, day, hour, minute, second);
+	switch(a){
+		case 1:
+			printf("An order from client : %s", message);
+			break;
+		case 2:
+			printf("Response has sent to client : %s", message);
+			break;
+	}
+	return;
+}
